@@ -8,7 +8,12 @@
 void test_init(void) {
   rbtree *t = new_rbtree();
   assert(t != NULL);
+#ifdef SENTINEL
+  assert(t->nil != NULL);
+  assert(t->root == t->nil);
+#else
   assert(t->root == NULL);
+#endif
   delete_rbtree(t);
 }
 
@@ -20,9 +25,15 @@ void test_insert_single(const key_t key) {
   assert(t->root == p);
   assert(p->key == key);
   // assert(p->color == RBTREE_BLACK);  // color of root node should be black
+#ifdef SENTINEL
+  assert(p->left == t->nil);
+  assert(p->right == t->nil);
+  assert(p->parent == t->nil);
+#else
   assert(p->left == NULL);
   assert(p->right == NULL);
   assert(p->parent == NULL);
+#endif
   delete_rbtree(t);
 }
 
@@ -51,7 +62,11 @@ void test_erase_root(const key_t key) {
   assert(p->key == key);
 
   rbtree_erase(t, p);
+#ifdef SENTINEL
+  assert(t->root == t->nil);
+#else
   assert(t->root == NULL);
+#endif
 
   delete_rbtree(t);
 }
@@ -84,6 +99,9 @@ void test_minmax(key_t *arr, const size_t n) {
 
   insert_arr(t, arr, n);
   assert(t->root != NULL);
+#ifdef SENTINEL
+  assert(t->root != t->nil);
+#endif
 
   qsort((void *)arr, n, sizeof(key_t), comp);
   node_t *p = rbtree_min(t);
@@ -120,6 +138,7 @@ void test_to_array(rbtree *t, const key_t *arr, const size_t n) {
   for (int i = 0; i < n; i++) {
     assert(arr[i] == res[i]);
   }
+  free(res);
 }
 
 void test_multi_instance() {
@@ -150,6 +169,8 @@ void test_multi_instance() {
     assert(arr2[i] == res2[i]);
   }
 
+  free(res2);
+  free(res1);
   delete_rbtree(t2);
   delete_rbtree(t1);
 }
@@ -159,8 +180,9 @@ void test_multi_instance() {
 // The values of right subtree should be greater than or equal to the current
 // node
 
-static bool search_traverse(const node_t *p, key_t *min, key_t *max) {
-  if (p == NULL) {
+static bool search_traverse(const node_t *p, key_t *min, key_t *max,
+                            node_t *nil) {
+  if (p == nil) {
     return true;
   }
 
@@ -169,11 +191,11 @@ static bool search_traverse(const node_t *p, key_t *min, key_t *max) {
   key_t l_min, l_max, r_min, r_max;
   l_min = l_max = r_min = r_max = p->key;
 
-  const bool lr = search_traverse(p->left, &l_min, &l_max);
+  const bool lr = search_traverse(p->left, &l_min, &l_max, nil);
   if (!lr || l_max > p->key) {
     return false;
   }
-  const bool rr = search_traverse(p->right, &r_min, &r_max);
+  const bool rr = search_traverse(p->right, &r_min, &r_max, nil);
   if (!rr || r_min < p->key) {
     return false;
   }
@@ -187,7 +209,12 @@ void test_search_constraint(const rbtree *t) {
   assert(t != NULL);
   node_t *p = t->root;
   key_t min, max;
-  assert(search_traverse(p, &min, &max));
+#ifdef SENTINEL
+  node_t *nil = t->nil;
+#else
+  node_t *nil = NULL;
+#endif
+  assert(search_traverse(p, &min, &max, nil));
 }
 
 // Color constraint
@@ -206,8 +233,8 @@ static void init_color_traverse(void) {
 }
 
 static bool color_traverse(const node_t *p, const color_t parent_color,
-                           const int black_depth) {
-  if (p == NULL) {
+                           const int black_depth, node_t *nil) {
+  if (p == nil) {
     if (!touch_nil) {
       touch_nil = true;
       max_black_depth = black_depth;
@@ -220,17 +247,22 @@ static bool color_traverse(const node_t *p, const color_t parent_color,
     return false;
   }
   int next_depth = ((p->color == RBTREE_BLACK) ? 1 : 0) + black_depth;
-  return color_traverse(p->left, p->color, next_depth) &&
-         color_traverse(p->right, p->color, next_depth);
+  return color_traverse(p->left, p->color, next_depth, nil) &&
+         color_traverse(p->right, p->color, next_depth, nil);
 }
 
 void test_color_constraint(const rbtree *t) {
   assert(t != NULL);
+#ifdef SENTINEL
+  node_t *nil = t->nil;
+#else
+  node_t *nil = NULL;
+#endif
   node_t *p = t->root;
-  assert(p == NULL || p->color == RBTREE_BLACK);
+  assert(p == nil || p->color == RBTREE_BLACK);
 
   init_color_traverse();
-  assert(color_traverse(p, RBTREE_BLACK, 0));
+  assert(color_traverse(p, RBTREE_BLACK, 0, nil));
 }
 
 // rbtree should keep search tree and color constraints
@@ -267,7 +299,7 @@ void test_minmax_suite() {
   test_minmax(entries, n);
 }
 
-void test_to_array_suite () {
+void test_to_array_suite() {
   rbtree *t = new_rbtree();
   assert(t != NULL);
 
@@ -278,15 +310,74 @@ void test_to_array_suite () {
   delete_rbtree(t);
 }
 
+void test_find_erase(rbtree *t, const key_t *arr, const size_t n) {
+  for (int i = 0; i < n; i++) {
+    node_t *p = rbtree_insert(t, arr[i]);
+    assert(p != NULL);
+  }
+
+  for (int i = 0; i < n; i++) {
+    node_t *p = rbtree_find(t, arr[i]);
+    // printf("arr[%d] = %d\n", i, arr[i]);
+    assert(p != NULL);
+    assert(p->key == arr[i]);
+    rbtree_erase(t, p);
+  }
+
+  for (int i = 0; i < n; i++) {
+    node_t *p = rbtree_find(t, arr[i]);
+    assert(p == NULL);
+  }
+
+  for (int i = 0; i < n; i++) {
+    node_t *p = rbtree_insert(t, arr[i]);
+    assert(p != NULL);
+    node_t *q = rbtree_find(t, arr[i]);
+    assert(q != NULL);
+    assert(q->key == arr[i]);
+    assert(p == q);
+    rbtree_erase(t, p);
+    q = rbtree_find(t, arr[i]);
+    assert(q == NULL);
+  }
+}
+
+void test_find_erase_fixed() {
+  const key_t arr[] = {10, 5, 8, 34, 67, 23, 156, 24, 2, 12, 24, 36, 990, 25};
+  const size_t n = sizeof(arr) / sizeof(arr[0]);
+  rbtree *t = new_rbtree();
+  assert(t != NULL);
+
+  test_find_erase(t, arr, n);
+
+  delete_rbtree(t);
+}
+
+void test_find_erase_rand(const size_t n, const unsigned int seed) {
+  srand(seed);
+  rbtree *t = new_rbtree();
+  key_t *arr = calloc(n, sizeof(key_t));
+  for (int i = 0; i < n; i++) {
+    arr[i] = rand();
+  }
+
+  test_find_erase(t, arr, n);
+
+  free(arr);
+  delete_rbtree(t);
+}
+
 int main(void) {
   test_init();
   test_insert_single(1024);
   test_find_single(512, 1024);
   test_erase_root(128);
+  test_find_erase_fixed();
   test_minmax_suite();
   test_to_array_suite();
   test_distinct_values();
   test_duplicate_values();
   test_multi_instance();
+  test_find_erase_rand(1000000, 17);
   printf("Passed all tests!\n");
 }
